@@ -1,0 +1,266 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>One-shot symbol finder</title>
+<style>
+  body { margin:0; font:14px system-ui; display:flex; height:100vh;
+         -webkit-user-select:none; user-select:none; }
+  #side { width:270px; padding:14px; border-right:1px solid #ccc; overflow-y:auto; flex-shrink:0; }
+  #side h2 { margin:0 0 6px; font-size:16px; }
+  #wrap { flex:1; overflow:auto; position:relative; background:#888; }
+  #stage { position:relative; transform-origin:0 0; }
+  #sheet { display:block; }
+  #ovl { position:absolute; inset:0; cursor:crosshair; }
+  .hint { color:#555; font-size:12px; }
+  table { border-collapse:collapse; margin-top:6px; }
+  td { padding:1px 8px 1px 0; }
+  #count { font-size:28px; font-weight:700; }
+  button, select, input[type=file] { margin:3px 0; max-width:240px; }
+  label { display:block; margin:2px 0; }
+  #docname { font-weight:600; font-size:12px; word-break:break-all; }
+</style>
+<div id="side">
+  <h2>One-shot symbol finder</h2>
+  <input type="file" id="file" accept="application/pdf">
+  <div id="docname"></div>
+  <p class="hint">Drag a box around ONE symbol on the sheet. Everything similar
+  gets found — rotated, mirrored, resized, or partially covered. Tracing a
+  door finds doors of every width.</p>
+  <label>Sheet: <select id="page"></select></label>
+  <label><input type="checkbox" id="anysize" checked> match any size</label>
+  <label><input type="checkbox" id="veto" checked> ignore text-labeled symbols</label>
+  <label><input type="checkbox" id="v2engine"> use new pipeline (v2)</label>
+  <label id="confwrap" style="display:none">Confidence ≥ <span id="confval">80</span>%
+    <input type="range" id="conf" min="15" max="98" value="80"></label>
+  <label>Zoom <input type="range" id="zoom" min="25" max="200" value="50">%</label>
+  <button id="legendBtn">⚡ Auto-count everything via legend</button>
+  <div id="status" class="hint">draw a box, or hit auto-count</div>
+  <div id="count"></div>
+  <div id="stats"></div>
+</div>
+<div id="wrap"><div id="stage">
+  <img id="sheet" draggable="false"><svg id="ovl"></svg>
+</div></div>
+<script>
+const Z = __RENDER_ZOOM__;
+const img = document.getElementById('sheet');
+const ovl = document.getElementById('ovl');
+const stage = document.getElementById('stage');
+let dragging = null;
+
+async function loadMeta(selectIndex) {
+  const j = await (await fetch('/meta')).json();
+  document.getElementById('docname').textContent = j.name || 'no document loaded';
+  const sel = document.getElementById('page');
+  sel.innerHTML = '';
+  for (const p of j.pages) {
+    const o = document.createElement('option');
+    o.value = p.index; o.textContent = p.label;
+    sel.appendChild(o);
+  }
+  if (j.pages.length) {
+    sel.value = (selectIndex != null && j.pages.some(p => p.index == selectIndex))
+      ? selectIndex : j.pages[0].index;
+    loadPage();
+  }
+}
+document.getElementById('file').onchange = async (e) => {
+  const f = e.target.files[0];
+  if (!f) return;
+  document.getElementById('status').textContent = 'uploading + analyzing sheets…';
+  const fd = new FormData();
+  fd.append('file', f);
+  const j = await (await fetch('/upload', {method: 'POST', body: fd})).json();
+  if (j.error) { document.getElementById('status').textContent = j.error; return; }
+  document.getElementById('status').textContent =
+    (j.warning ? '⚠️ ' + j.warning : `loaded ${j.pages.length} sheets`);
+  await loadMeta(null);
+};
+
+function loadPage() {
+  img.src = '/page/' + document.getElementById('page').value + '.png';
+  img.onload = () => {
+    stage.style.width = img.naturalWidth + 'px';
+    stage.style.height = img.naturalHeight + 'px';
+    ovl.setAttribute('viewBox', `0 0 ${img.naturalWidth} ${img.naturalHeight}`);
+    ovl.style.width = img.naturalWidth + 'px';
+    ovl.style.height = img.naturalHeight + 'px';
+    applyZoom();
+  };
+  ovl.innerHTML = '';
+  document.getElementById('count').textContent = '';
+  document.getElementById('stats').innerHTML = '';
+}
+function applyZoom() {
+  stage.style.transform = 'scale(' + document.getElementById('zoom').value / 100 + ')';
+}
+document.getElementById('zoom').oninput = applyZoom;
+document.getElementById('page').onchange = loadPage;
+
+function evtPos(e) {
+  const s = document.getElementById('zoom').value / 100;
+  const r = stage.getBoundingClientRect();
+  return [(e.clientX - r.left) / s, (e.clientY - r.top) / s];
+}
+ovl.onmousedown = e => { dragging = evtPos(e); e.preventDefault(); };
+ovl.onmousemove = e => {
+  if (!dragging) return;
+  const [x1, y1] = evtPos(e);
+  ovl.innerHTML = rubberSvg(dragging[0], dragging[1], x1, y1);
+};
+ovl.onmouseup = e => {
+  if (!dragging) return;
+  const [x1, y1] = evtPos(e);
+  const box = [Math.min(dragging[0], x1) / Z, Math.min(dragging[1], y1) / Z,
+               Math.max(dragging[0], x1) / Z, Math.max(dragging[1], y1) / Z];
+  dragging = null;
+  if ((box[2] - box[0]) < 2 || (box[3] - box[1]) < 2) return;
+  runDetect(box);
+};
+function rubberSvg(x0, y0, x1, y1) {
+  return `<rect x="${Math.min(x0,x1)}" y="${Math.min(y0,y1)}"
+    width="${Math.abs(x1-x0)}" height="${Math.abs(y1-y0)}"
+    fill="rgba(30,120,255,.15)" stroke="#1e78ff" stroke-width="2"/>`;
+}
+async function runDetect(box) {
+  document.getElementById('status').textContent = 'searching…';
+  const res = await fetch('/detect', {
+    method: 'POST', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({
+      page: document.getElementById('page').value, box: box,
+      any_size: document.getElementById('anysize').checked,
+      veto_text: document.getElementById('veto').checked,
+      engine: document.getElementById('v2engine').checked ? 'v2' : 'v1' })
+  });
+  const j = await res.json();
+  if (j.error) { document.getElementById('status').textContent = j.error; return; }
+  let st = `${j.elapsed}s · exemplar has ${j.n_exemplar_prims} primitives` +
+    (j.n_traced_prims > j.n_exemplar_prims
+      ? ` (${j.n_traced_prims - j.n_exemplar_prims} stray traced bits ignored)` : '');
+  if (j.mode === 'door')
+    st = `${j.elapsed}s · door recognized → parametric mode: finding doors of EVERY width`;
+  else if (j.n_exemplar_prims <= 4)
+    st += ' ⚠️ very generic shape — widen the box to include ticks/details';
+  document.getElementById('status').textContent = st;
+  if (j.engine === 'v2') { lastV2 = j; renderV2(); return; }
+  document.getElementById('count').textContent = j.count + ' found';
+  const t = (o) => Object.entries(o || {}).map(([k,v]) =>
+    `<tr><td>${k}</td><td>${v}</td></tr>`).join('');
+  document.getElementById('stats').innerHTML =
+    `<table><tr><td colspan=2><b>by rotation</b></td></tr>${t(j.by_rotation)}
+     <tr><td colspan=2><b>by size</b></td></tr>${t(j.by_scale)}</table>`;
+  const b = j.box_used || box;
+  let svg = rubberSvg(b[0]*Z, b[1]*Z, b[2]*Z, b[3]*Z);
+  for (const d of j.detections) {
+    const pts = d.corners.map(c => (c[0]*Z) + ',' + (c[1]*Z)).join(' ');
+    const col = d.score > 0.95 ? '#e02020' : '#e08a00';
+    const info = d.width ? `door ${d.width}` :
+      `${d.theta_deg}° · ×${d.scale}${d.mirrored ? ' · mirrored' : ''}`;
+    svg += `<polygon points="${pts}" fill="none" stroke="${col}" stroke-width="2.5">
+      <title>score ${d.score} · ${info}</title></polygon>`;
+  }
+  ovl.innerHTML = svg;
+}
+
+// ---- v2 confidence slider: re-slices the stored response, no re-query ----
+let lastV2 = null;
+function renderV2() {
+  if (!lastV2) return;
+  const j = lastV2;
+  const minConf = +document.getElementById('conf').value;
+  const shown = j.detections.filter(d => d.confidence >= minConf);
+  const confident = shown.filter(d => d.confidence >= j.conf_accept).length;
+  const flagged = shown.length - confident;
+  document.getElementById('count').textContent =
+    `${confident} confident + ${flagged} flagged`;
+  const b = j.box_used;
+  let svg = b ? rubberSvg(b[0]*Z, b[1]*Z, b[2]*Z, b[3]*Z) : '';
+  for (const d of shown) {
+    const pts = d.corners.map(c => (c[0]*Z) + ',' + (c[1]*Z)).join(' ');
+    const col = d.confidence >= j.conf_accept ? '#e02020' : '#e08a00';
+    const info = d.width ? `door ${d.width}` :
+      `${d.theta_deg}° · ×${d.scale}${d.mirrored ? ' · mirrored' : ''}`;
+    svg += `<polygon points="${pts}" fill="none" stroke="${col}" stroke-width="2.5">
+      <title>${d.confidence}% · ${info}</title></polygon>`;
+  }
+  ovl.innerHTML = svg;
+  const t = (o) => Object.entries(o || {}).map(([k,v]) =>
+    `<tr><td>${k}</td><td>${v}</td></tr>`).join('');
+  document.getElementById('stats').innerHTML =
+    `<div class="hint">red = confident (≥${j.conf_accept}%) · orange = flagged ·
+     drag the slider to reveal or hide uncertain hits</div>
+    <table><tr><td colspan=2><b>by rotation</b></td></tr>${t(j.by_rotation)}
+     <tr><td colspan=2><b>by size</b></td></tr>${t(j.by_scale)}</table>`;
+}
+document.getElementById('conf').oninput = () => {
+  document.getElementById('confval').textContent =
+    document.getElementById('conf').value;
+  renderV2();
+};
+document.getElementById('v2engine').onchange = () => {
+  document.getElementById('confwrap').style.display =
+    document.getElementById('v2engine').checked ? 'block' : 'none';
+};
+
+const PALETTE = ['#e02020','#1c7ed6','#0ca678','#f076b0','#7048e8','#e8590c',
+                 '#0b7285','#9c36b5','#5c940d','#d6336c','#364fc7','#f59f00'];
+let legendResults = null;
+let legendSelected = null;
+
+function legendSvg() {
+  let svg = '';
+  legendResults.forEach((r, i) => {
+    if (legendSelected !== null && i !== legendSelected) return;
+    const col = PALETTE[i % PALETTE.length];
+    const wide = legendSelected === i ? 4 : 2.5;
+    for (const d of r.detections) {
+      const pts = d.corners.map(c => (c[0]*Z) + ',' + (c[1]*Z)).join(' ');
+      svg += `<polygon points="${pts}" fill="none" stroke="${col}" stroke-width="${wide}">
+        <title>${r.label} · score ${d.score} · ×${d.scale}</title></polygon>`;
+    }
+  });
+  return svg;
+}
+function renderLegend() {
+  ovl.innerHTML = legendSvg();
+  const total = legendResults.reduce((a, r) => a + r.count, 0);
+  const allSel = legendSelected === null;
+  let rows = `<tr data-i="all" style="cursor:pointer;${allSel ? 'background:#dde9ff' : ''}">
+    <td style="font-weight:700">${total}</td><td><b>ALL SYMBOLS</b></td></tr>`;
+  legendResults.forEach((r, i) => {
+    const col = PALETTE[i % PALETTE.length];
+    const sel = legendSelected === i;
+    rows += `<tr data-i="${i}" style="cursor:pointer;${sel ? 'background:#dde9ff' : ''}">
+      <td style="color:${col};font-weight:700">${r.count}</td>
+      <td style="color:${col}">${r.label}</td></tr>`;
+  });
+  document.getElementById('stats').innerHTML =
+    `<div class="hint">click a row to isolate that symbol · click again for all</div>
+     <table>${rows}</table>`;
+  document.querySelectorAll('#stats tr').forEach(tr => {
+    tr.onclick = () => {
+      const v = tr.getAttribute('data-i');
+      legendSelected = (v === 'all' || legendSelected === +v) ? null : +v;
+      renderLegend();
+    };
+  });
+}
+document.getElementById('legendBtn').onclick = async () => {
+  document.getElementById('status').textContent =
+    'harvesting legend sheets + counting every symbol… (~15-30s)';
+  document.getElementById('count').textContent = '';
+  document.getElementById('stats').innerHTML = '';
+  const res = await fetch('/legend_count', {
+    method: 'POST', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({page: document.getElementById('page').value,
+      engine: document.getElementById('v2engine').checked ? 'v2' : 'v1'})
+  });
+  const j = await res.json();
+  if (j.error) { document.getElementById('status').textContent = j.error; return; }
+  document.getElementById('status').textContent =
+    `${j.elapsed}s · ${j.n_legend_symbols} legend symbols read · ${j.n_matched} found on this sheet`;
+  legendResults = j.results;
+  legendSelected = null;
+  renderLegend();
+};
+loadMeta(null);
+</script>

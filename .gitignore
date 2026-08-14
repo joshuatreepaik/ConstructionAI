@@ -1,0 +1,20 @@
+# Python environment
+.venv/
+__pycache__/
+*.pyc
+
+# Client drawing sets — do NOT commit.
+# data.pdf is a real Skanska construction document (client name, site address,
+# engineer stamps). Anyone cloning this repo supplies their own vector PDF.
+data.pdf
+*.pdf
+uploads/
+
+# Generated output (overlays, crops, reports) — reproducible by running the scripts
+out/
+
+# Local editor/tooling overrides
+.claude/settings.local.json
+
+# OS noise
+.DS_Store
