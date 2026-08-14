@@ -1,175 +1,241 @@
-# One-Shot Symbol Detection on Construction Drawings — Method Design
+# Method and research basis
 
-Synthesis of three research threads (academic symbol spotting, exemplar-based
-detection/counting, commercial takeoff tools), 2026-08-08. Target: a
-trace-one-find-all engine that is demonstrably better than raster template
-matching (Bluebeam Visual Search and similar demos).
+These are the design notes written before any code, on 2026-08-08, after reading
+through three bodies of work: academic symbol spotting on CAD drawings,
+exemplar-based detection and counting in computer vision, and the commercial
+takeoff tools already selling this feature. They are kept here as the record of
+why the system is shaped the way it is.
 
-## 1. What the research established
+The goal was a trace-one-find-all engine that beats raster template matching on
+the cases where template matching is known to fail, rather than one that merely
+matches it. Section 5 says plainly which parts of this design got built and
+which are still on paper.
 
-### The CEO's demo has a name and known failure modes
-"User traces a symbol → find all instances" is Bluebeam Revu **Visual Search**
-(shipped for years), PlanSwift Auto Count, Kreo Auto Count, Countfire. All are
-raster template matching with a user-facing sensitivity slider. Documented
-failure modes across every commercial tool (design targets for us):
+## 1. The demo has a name, and its failure modes are documented
 
-1. **Occlusion breaks matching** — symbol crossed by a wall/wire/leader line
-   fails at high sensitivity, floods false positives at low. Kreo literally
-   ships an "eraser" so users can scrub clutter out of the reference crop.
-2. **Threshold dumped on the user** — no calibrated confidence anywhere.
-3. **Rotation/mirror/scale intolerance** — Bluebeam: opt-in 0/90/180/270 only.
-   Mirrored symbols (doors/receptacles on opposite walls) are routine.
-4. **Near-identical variant confusion** — duplex vs GFCI vs quad receptacle;
-   door vs window (Togal's peer-reviewed study found exactly this).
-5. **Legend/title-block/key-plan double counting** — PlanSwift makes users
-   hand-draw up to 9 exclusion regions.
-6. **Silent incompleteness** — Bluebeam forum: searches that silently stop
-   halfway down the page. No tool proves coverage.
-7. **Whitespace poisoning** — box too big → empty space participates in match.
-8. **Review cost eats savings** — "98%" marketing vs 60–85% field accuracy;
-   the review workflow IS the product.
+"User traces a symbol, software finds all the others" is Bluebeam Revu's
+**Visual Search**, and it has shipped for years. PlanSwift Auto Count, Kreo Auto
+Count and Countfire all do the same thing. Every one of them is raster template
+matching behind a sensitivity slider.
 
-### The academic state of the art has an open gap that this method fills
-The "panoptic symbol spotting" line (FloorPlanCAD ICCV'21 → CADTransformer →
-GAT-CADNet → SymPoint → VecFormer NeurIPS'25, PQ 59→88) proves vector-primitive
-transformers beat raster CNNs on CAD drawings — but **every one is closed-set
-and fully supervised** (30 fixed classes). Explicitly listed open gaps that
-match our design: (a) no exemplar-conditioned/one-shot spotting on vector
-primitives, (b) rotation/mirror invariance untested by any benchmark,
-(c) parametric symbols (variable-width doors) unmodeled, (d) sheet legends as
-free per-document exemplars — untapped.
+Their failure modes are well documented across vendor docs, support forums and
+one peer-reviewed study, and they became the design targets:
 
-The one-shot literature that does exist is raster-only: OSSR-PID / TCS patent
-US12039641 (path sampling → DGCNN + ArcFace, ~86% on synthetic P&IDs, only
-±20° rotation); Rezvanifar JEI 2021 (geometry-based QBE on born-digital plans —
-closest prior art, worth citing in the writeup).
+1. **Occlusion breaks the match.** A symbol crossed by a wall, a wire or a
+   leader line fails at high sensitivity and floods false positives at low.
+   Kreo ships an eraser tool so users can manually scrub clutter out of the
+   reference crop, which tells you how routine the problem is.
+2. **The threshold is dumped on the user.** No calibrated confidence anywhere.
+3. **Rotation, mirroring and scale are barely handled.** Bluebeam offers
+   opt-in 0/90/180/270 degrees and nothing between. Mirrored symbols are
+   completely routine on real drawings, since doors and receptacles on opposite
+   walls are reflections of each other.
+4. **Near-identical variants get confused.** Duplex against GFCI against quad
+   receptacle; door against window. Togal.AI's own peer-reviewed study found
+   exactly this failure in their product.
+5. **Legends, title blocks and key plans get double counted.** PlanSwift asks
+   users to hand-draw up to nine exclusion regions per sheet.
+6. **Incompleteness is silent.** There are Bluebeam forum reports of searches
+   that simply stop halfway down a page. No tool proves it looked everywhere.
+7. **Whitespace poisons the match.** Draw the trace box slightly too large and
+   the empty space inside it becomes part of what the tool matches on.
+8. **Review cost eats the savings.** Marketing says 98%, field reports say 60
+   to 85%. When accuracy is in that range the review workflow is not a
+   supporting feature, it is the product.
 
-### The right matching machinery (from the exemplar-matching survey)
-- Deep few-shot counters (FSC-147 lineage: FamNet…LOCA, CounTR) output density
-  maps — no discrete instances, hallucinate on hatching. Reject.
-- Modern visual-prompt detectors (T-Rex2, CountGD, DINO-X) are the closest
-  products but natural-image-trained, axis-aligned, not rotation invariant,
-  API/closed. Use as baselines to beat, not as the core.
-- Binary line drawings remove what deep features are best at (texture, color)
-  and keep exactly what classical geometric methods use (strokes with
-  orientations). The problem is structurally **industrial 2D pose search**
-  (Halcon shape-based matching, generalized Hough, Fast Directional Chamfer),
-  which natively provides: continuous rotation, occlusion-tolerant partial
-  scoring, discrete detections with pose, full-resolution operation.
-- The right meta-pattern is DAVE/GeCo's **detect-then-verify**: geometric
-  proposer (high recall) + learned verifier (kills false positives).
+## 2. Where the academic work stops
 
-## 2. The method: pose-voting geometric fingerprinting + canonicalized learned verification
+The panoptic symbol spotting line of research, running from FloorPlanCAD at
+ICCV 2021 through CADTransformer, GAT-CADNet and SymPoint to VecFormer at
+NeurIPS 2025, established one thing clearly: transformers reading vector
+primitives beat raster CNNs on CAD drawings. Panoptic quality across that line
+climbed from 59 to 88.
 
-Operates on PDF vector primitives (born-digital CAD exports — confirmed for
-the Skanska set: 28k paths/sheet, live text). Raster fallback in §4.
+Every single one of them is closed-set and fully supervised, trained on 30
+fixed classes. The papers themselves list the open problems, and they line up
+almost exactly with what this project needs:
 
-### Stage 0 — Sheet understanding (once per sheet)
-- Parse primitives (lines, arcs, béziers) and text via PyMuPDF.
-- Segment sheet regions: plan area vs title block vs legend vs key plan vs
-  schedules (layout heuristics + text anchors like "LEGEND", "KEY PLAN").
-  Kills failure mode #5 automatically.
-- Auto-seed exemplars from legend regions with their text labels
-  (self-labeling: symbol crop + name for free). User tracing = same input path.
+- no exemplar-conditioned or one-shot spotting on vector primitives
+- rotation and mirror invariance untested by any existing benchmark
+- parametric symbols, such as doors whose width varies, not modelled at all
+- sheet legends never used as free per-document exemplars
 
-### Stage 1 — Exemplar model
-Primitives wholly inside the traced box → model set M (whitespace and clipped
-wall lines excluded by construction — kills #7 and the Kreo-eraser problem).
+The one-shot work that does exist is raster only. OSSR-PID and the related TCS
+patent (US12039641) sample paths into a DGCNN with ArcFace and reach about 86%
+on synthetic P&IDs, but tolerate only about 20 degrees of rotation. The closest
+prior art is Rezvanifar's geometry-based query-by-example work on born-digital
+plans (JEI 2021), which is worth citing directly.
 
-### Stage 2 — Invariant fingerprinting
-For each primitive pair within a k-NN neighborhood (O(N·k), not O(N²)):
-descriptor d = (type_i, type_j, length ratio, inter-orientation angle,
-normalized midpoint distance, junction relation). d is invariant to
-translation/rotation/scale; mirror handled by also indexing flipped
-descriptors. Quantized d → hash key. Build one hash index over the sheet.
+That gap is the interesting part. Exemplar-conditioned spotting on vector
+primitives appears to be genuinely unpublished as of the VecFormer line.
 
-### Stage 3 — Pose voting (the proposer)
-Each exemplar-key hit in the index votes for a full similarity transform
-(tx, ty, θ, scale, mirror) of the model. Cluster votes in transform space
-(mean-shift; cleaner than gridded Hough). Peaks = candidate instances **with
-explicit pose**. Score = fraction of model primitives explained under the
-recovered pose — Halcon-style partial score, so a receptacle crossed by a wall
-still scores ~0.7–0.8 instead of failing (kills #1, #3). The score has
-physical meaning ("78% of the symbol's geometry found"), replacing the
-sensitivity slider (kills #2).
+## 3. Picking the machinery
 
-### Stage 4 — Geometric verification
-Apply pose, assign model↔scene primitives (greedy with type/distance gating),
-least-squares pose refinement, reject below threshold. On true CAD exports
-where symbols are block copies, this stage is near-exact.
+Three families were candidates, and two were rejected for concrete reasons.
 
-### Stage 5 — Canonicalized learned verification (the ML layer)
-Undo each candidate's recovered rotation/scale → render exemplar and candidate
-to small canonical rasters → embedding similarity (DINOv2 patches, or a small
-contrastive encoder trained on synthetic line-art augmentations: random
-occluding strokes, style jitter, dash-pattern changes). Canonicalization
-sidesteps deep features' rotation weakness entirely — the geometry stage hands
-the verifier a solved pose. Then DAVE-style outlier clustering across all
-accepted candidates: embed, cluster, drop clusters inconsistent with the
-exemplar (kills #4). Negative exemplars (user right-clicks a false hit)
-subtract in embedding space — T-Rex-Omni's negative-prompt idea.
+Deep few-shot counters, the FSC-147 lineage running through FamNet, LOCA and
+CounTR, output density maps rather than discrete objects. A density map cannot
+tell an estimator *which* receptacle it found or where, and these models
+hallucinate badly on repetitive hatching. Rejected.
 
-### Stage 6 — Text fusion & semantics
-Attach nearby text tokens to each instance; identical geometry with different
-tags → split counts (automatic version of Kreo "Split by Text"). GFCI vs
-switched vs quad subscripts resolved by the text layer, not pixels.
+Visual-prompt detectors such as T-Rex2, CountGD and DINO-X are the closest
+things on the market, but they are trained on natural images, work on
+axis-aligned boxes, are not rotation invariant, and are closed APIs. They are
+useful as baselines to beat, not as the core.
 
-### Stage 7 — Calibrated confidence, coverage, reconciliation
-- Per-instance confidence from geometric score × embedding score; low-confidence
-  queue sorted for review (fixes #8: verify 500 detections in minutes).
-- Coverage proof: every primitive was indexed — report per-sheet totals and
-  unexplained-cluster anomalies (kills #6, Bluebeam's silent half-page stop).
-- Reconcile counts against the document's own schedules (door schedule on T1,
-  receptacle circuits on panel schedule E6) → discrepancy report. No commercial
-  tool does this; it's what human estimators do.
+The third option is the one that fits. A line drawing has deliberately removed
+everything deep visual features are best at, namely texture and colour, and
+kept exactly what classical geometry uses: strokes with orientations. Framed
+properly this is not an image recognition problem at all, it is industrial 2D
+pose search, the same problem Halcon's shape-based matching, the generalized
+Hough transform and Fast Directional Chamfer Matching were built for. That
+family natively provides continuous rotation, occlusion-tolerant partial
+scoring, discrete detections that come with a pose, and operation at full
+resolution.
 
-### Parametric symbols (doors)
-Doors are parametric (width varies), so rigid matching misses them by design.
-Extension: vote on sub-part structure (quarter-arc + leaf line + hinge point)
-with width as a free parameter recovered per instance — outputs door width as
-a bonus (feeds pricing). This is academic gap (c); no published method does it.
+The organising pattern comes from DAVE and GeCo: propose with a geometric
+method tuned for recall, then verify with something stricter that removes the
+false positives.
 
-## 3. Why this beats the demo (one table for the writeup)
+## 4. The design
 
-| Axis | Raster template match (demo) | This method |
+Everything operates on PDF vector primitives. The sample set is a born-digital
+CAD export with roughly 28,000 paths per sheet and live text, which is the
+normal case for drawings issued to a general contractor.
+
+**Reading the sheet.** Parse primitives and text once with PyMuPDF. Segment the
+sheet into plan area, title block, legend, key plan and schedules, using layout
+heuristics anchored on printed captions like "LEGEND" and "KEY PLAN". This
+removes failure mode 5 without asking the user to draw anything.
+
+**Seeding exemplars from the legend.** A legend is a labelled dictionary of
+every symbol the drawing uses, sitting right there on the sheet. Harvesting
+those glyphs with their printed names gives self-labelled exemplars for free,
+and they enter the system through exactly the same path as a user-traced box.
+
+**Building the exemplar model.** Take the primitives lying wholly inside the
+traced box. Clipped wall lines and empty space are excluded by construction,
+which removes failure mode 7 and the reason Kreo needs an eraser.
+
+**Fingerprinting.** For each pair of primitives within a k-nearest-neighbour
+neighbourhood, which keeps this linear rather than quadratic, compute a
+descriptor from the two primitive types, their length ratio, the angle between
+them, their normalised midpoint distance and their junction relationship. Every
+one of those quantities survives translation, rotation and scaling. Mirroring
+is handled by also indexing the flipped descriptor. Quantise the descriptor
+into a hash key and build one index over the sheet.
+
+**Pose voting.** Each match between an exemplar key and the sheet index votes
+for a complete similarity transform: translation, rotation, scale and mirror.
+Where votes agree, there is a candidate instance, and it arrives with an
+explicit pose rather than just a location. Scoring a candidate by how much of
+the exemplar's geometry is actually accounted for gives a number with physical
+meaning, so a receptacle crossed by a wall scores around 0.75 instead of
+failing outright. That addresses failure modes 1, 2 and 3 together.
+
+**Geometric verification.** Apply the recovered pose, assign model primitives
+to scene primitives with type and distance gating, refine the pose by least
+squares, and reject what falls short. On true CAD exports, where repeated
+symbols are block copies of one another, this step is close to exact.
+
+**Learned verification, optional.** Undo each candidate's recovered rotation
+and scale, render exemplar and candidate to small canonical rasters, and
+compare embeddings. Canonicalisation sidesteps the rotation weakness of deep
+features entirely, because the geometry stage hands the verifier a pose that is
+already solved. Clustering the accepted candidates in embedding space and
+dropping clusters inconsistent with the exemplar would address failure mode 4.
+
+**Text fusion.** Attach nearby text to each instance. Identical geometry
+carrying different tags should split into different counts, which is the
+automatic version of Kreo's manual "Split by Text". GFCI, switched and quad
+receptacles differ by a printed subscript, not by shape, so this has to be
+resolved in the text layer.
+
+**Confidence, coverage and reconciliation.** Per-instance confidence drives a
+review queue sorted worst-first, so verifying 500 detections takes minutes
+rather than hours, which is the answer to failure mode 8. Because every
+primitive on the sheet is indexed, the system can in principle report what it
+never explained, which is the answer to failure mode 6. And counts can be
+checked against the drawing set's own schedules, since a door schedule and a
+panel schedule state the same quantities the plans do. No commercial tool does
+that, and it is exactly what a human estimator does before trusting a number.
+
+**Parametric symbols.** Doors are the awkward case, because a door's width
+varies and rigid matching therefore misses them by design. The answer is to
+vote on sub-part structure instead: a quarter arc, a leaf line, and a hinge
+where they meet, with width left as a free parameter recovered per instance.
+The width then falls out as a useful output rather than a complication, since
+it feeds pricing directly. This is the third academic gap listed above, and no
+published method addresses it.
+
+## 5. What got built, and what did not
+
+Built and working:
+
+- sheet parsing, region segmentation, and scale recovery from the sheet's own
+  scale note
+- legend harvesting with printed labels, driving the auto-count button
+- invariant fingerprinting and the sheet-wide hash index, with rarity weighting
+  added later once hatching proved to dominate the index
+- pose voting, geometric verification, and calibrated confidence with an
+  explicit review queue
+- text-based naming and vetoing of candidates
+- parametric door detection with per-instance width recovery
+- schedule reconciliation against the OCR'd panel schedules
+
+Designed but not built:
+
+- the learned verification layer. The geometric stages turned out to carry more
+  of the load than expected, and the honest reason this is missing is time.
+- the coverage report. Every primitive is indexed, so the data is there, but
+  nothing surfaces what went unexplained.
+- negative exemplars, where a user right-clicks a false hit to push it away.
+- the raster fallback of section 7.
+- hand-counted ground truth, and therefore any real precision and recall
+  numbers.
+
+Deliberately changed during implementation:
+
+- vote clustering uses a grid rather than the mean-shift proposed here. Grid
+  binning was simpler, and refining each cluster's pose as a weighted average of
+  its own votes recovers the precision that the grid would otherwise cost.
+- candidate scoring became a log-odds ratio against the local background rather
+  than a plain fraction of geometry explained. Same idea, but it makes a match
+  in dense linework count for less than the same match in clear space, which the
+  simpler score could not express.
+- subclass tags are attached to detections but do not yet split the counts.
+
+## 6. Why this beats template matching
+
+| | Raster template match | This method |
 |---|---|---|
-| Occlusion by linework | breaks / slider gymnastics | partial-score voting, degrades gracefully |
-| Rotation / mirror | coarse 90° steps, opt-in | continuous, native, incl. mirror |
-| Threshold | user-tuned sensitivity | calibrated "fraction of geometry explained" |
-| Whitespace in trace box | poisons match | ignored by construction |
-| Variant confusion | counts GFCI as duplex | embedding verify + text fusion |
-| Legend/key-plan double count | user draws exclusions | auto region semantics |
-| Coverage | silent gaps | provable, per-sheet report |
-| Output | count | count + pose + width + label + confidence + schedule reconciliation |
-| Training data | none | none required (verifier optional, self-supervised) |
+| Occlusion by linework | breaks, or forces slider gymnastics | partial-score voting, degrades gradually |
+| Rotation and mirror | coarse 90 degree steps, opt-in | continuous and native, mirror included |
+| Threshold | user-tuned sensitivity | calibrated, derived from measured noise |
+| Whitespace in the trace box | poisons the match | excluded by construction |
+| Variant confusion | counts GFCI as duplex | text fusion, and embedding verify if built |
+| Legend and key-plan double count | user draws exclusions by hand | region semantics, automatic |
+| Coverage | silent gaps | indexed, and reportable in principle |
+| Output | a count | count, pose, width, label, confidence, and a schedule cross-check |
+| Training data | none | none |
 
-## 4. Raster fallback (scanned drawings)
-Same voting machinery over edge points + gradient orientations (Fast
-Directional Chamfer / generalized Hough): keeps continuous rotation and
-partial scoring on scans, degrading gracefully instead of collapsing
-(every commercial tool collapses on scans — open wedge).
+## 7. Raster fallback for scanned drawings
 
-## 5. Take-home scoping (build order)
-1. Stages 0–4 + 7 are classical, zero-training, implementable in days:
-   PyMuPDF + NumPy + scikit-learn. Demo on Skanska set with annotated
-   overlay PDF + per-class counts + schedule reconciliation.
-2. Stage 5 verifier if time permits (DINOv2 off-the-shelf on canonicalized
-   crops — no training — is enough to show the ML layer).
-3. Benchmark: hand-counted ground truth on T5 (doors, markers) and E4
-   (receptacles); report precision/recall per class; qualitative comparison
-   vs Bluebeam-style behavior (rotated/mirrored/occluded cases).
-4. Writeup framing: this sits in a documented research gap (exemplar-
-   conditioned spotting on vector primitives — none published as of the
-   VecFormer/NeurIPS 2025 line); cite FloorPlanCAD, VecFormer, OSSR-PID,
-   Rezvanifar 2021, DAVE/GeCo, T-Rex2 as the landscape.
+The same voting machinery runs over edge points and gradient orientations
+instead of vector primitives, in the manner of Fast Directional Chamfer
+Matching or a generalized Hough transform. That keeps continuous rotation and
+partial scoring on scans, so accuracy degrades rather than collapsing. Every
+commercial tool collapses on scans, which makes this an open wedge rather than
+a catch-up feature.
 
-## 6. Key references
+## 8. References
+
 - FloorPlanCAD (ICCV 2021): arxiv.org/abs/2105.07147 · VecFormer (NeurIPS
-  2025, SOTA PQ 88.4 no-prior): arxiv.org/abs/2505.23395
+  2025, state of the art at PQ 88.4 with no prior): arxiv.org/abs/2505.23395
 - GAT-CADNet (CVPR 2022): arxiv.org/abs/2201.00625 · SymPoint (ICLR 2024):
   arxiv.org/abs/2401.10556 · CADSpotting: arxiv.org/abs/2412.07377
 - OSSR-PID one-shot P&ID: arxiv.org/abs/2109.03849 · TCS patent US12039641
-- Rezvanifar, geometry-based QBE on born-digital plans (JEI 2021):
+- Rezvanifar, geometry-based query-by-example on born-digital plans (JEI 2021):
   doi.org/10.1117/1.JEI.30.4.043015
 - DAVE (CVPR 2024): arxiv.org/abs/2404.16622 · GeCo (NeurIPS 2024):
   arxiv.org/abs/2409.18686 · GeCo2 (AAAI 2026): arxiv.org/abs/2511.08048
@@ -179,7 +245,7 @@ partial scoring on scans, degrading gracefully instead of collapsing
   download.mvtec.com/halcon-9.0-solution-guide-ii-b-shape-based-matching.pdf
 - Fast Directional Chamfer Matching (CVPR 2010):
   merl.com/publications/docs/TR2010-045.pdf
-- Bluebeam Visual Search docs + failure reports:
+- Bluebeam Visual Search docs and failure reports:
   support.bluebeam.com/revu/features/visual-search-overview.html
 - Togal.AI peer-reviewed accuracy study:
   fmicorp.com/uploads/media/TogalAI_Case_Study_Whitepaper_FINAL.pdf
