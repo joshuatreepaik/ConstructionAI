@@ -95,7 +95,7 @@ are not equally bad mistakes. Stage 5 does the same with three buckets: accept, 
 reject with the reason attached. What comes out is a work list rather than a number.
 (`pipeline/resolve.py`)
 
-## Things a trained detector can't do
+## What falls out of the design
 
 **Read the drawing's own dictionary.** Every set ships a legend defining its symbols. This
 harvests those glyphs along with their printed names and counts them, so an unfamiliar
@@ -108,8 +108,8 @@ every width, and reports the width of each, since the arc radius *is* the door w
 
 **Check its own answer.** A drawing set states its quantities twice, once as symbols on the
 plan and once as schedules. `scripts/reconcile.py` counts receptacles on the plan, OCRs the
-panel schedule tables, and reports where the two agree, room by room. Estimators do this by
-hand. None of the takeoff tools surveyed do it at all.
+panel schedule tables, and reports where the two agree, room by room. It is the check a
+human estimator does by hand before trusting a number.
 
 **Say how sure it is, and why.** Every detection carries its evidence score, so the
 confidence slider filters results that were already scored instead of changing what the
@@ -137,9 +137,9 @@ specific offices on screen to catch it.
 
 **Vector PDFs only.** Scanned drawings have no geometry to read and the app says so on
 upload rather than returning nothing. A raster fallback is worked out in `METHOD.md` but
-not built. This is the one area where a trained detector is simply better, and the two fit
-together rather than competing: a YOLO-style proposer would slot into Stage 2 alongside the
-other three and inherit the same evidence scoring, arbitration and reconciliation.
+not built. If scans matter, a learned detector is the right tool for that path, and it
+would slot into Stage 2 as a fourth proposer, inheriting the same evidence scoring,
+arbitration and reconciliation as the rest.
 
 **No accuracy figures.** The thresholds come from measured score distributions, not from
 hand-counted ground truth, so there's no honest precision or recall number to quote per
