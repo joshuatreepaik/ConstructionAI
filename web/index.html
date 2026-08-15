@@ -28,8 +28,7 @@
   <label>Sheet: <select id="page"></select></label>
   <label><input type="checkbox" id="anysize" checked> match any size</label>
   <label><input type="checkbox" id="veto" checked> ignore text-labeled symbols</label>
-  <label><input type="checkbox" id="v2engine"> use new pipeline (v2)</label>
-  <label id="confwrap" style="display:none">Confidence ≥ <span id="confval">80</span>%
+  <label id="confwrap">Confidence ≥ <span id="confval">80</span>%
     <input type="range" id="conf" min="15" max="98" value="80"></label>
   <label>Zoom <input type="range" id="zoom" min="25" max="200" value="50">%</label>
   <button id="legendBtn">⚡ Auto-count everything via legend</button>
@@ -131,15 +130,17 @@ async function runDetect(box) {
       page: document.getElementById('page').value, box: box,
       any_size: document.getElementById('anysize').checked,
       veto_text: document.getElementById('veto').checked,
-      engine: document.getElementById('v2engine').checked ? 'v2' : 'v1' })
+      engine: 'v2' })
   });
   const j = await res.json();
   if (j.error) { document.getElementById('status').textContent = j.error; return; }
-  // cross-check applies to v2 symbol results (needs the schedule OCR path)
+  // cross-check: symbols vs panel schedules, doors vs the other plan sheets
   lastBox = box;
   document.getElementById('recon').innerHTML = '';
-  document.getElementById('reconBtn').style.display =
-    (j.engine === 'v2' && j.mode === 'symbol') ? '' : 'none';
+  document.getElementById('reconBtn').style.display = '';
+  document.getElementById('reconBtn').textContent = j.mode === 'door'
+    ? '🚪 Cross-check vs the other sheets'
+    : '🧾 Cross-check vs panel schedules';
   let st = `${j.elapsed}s · exemplar has ${j.n_exemplar_prims} primitives` +
     (j.n_traced_prims > j.n_exemplar_prims
       ? ` (${j.n_traced_prims - j.n_exemplar_prims} stray traced bits ignored)` : '');
@@ -148,24 +149,7 @@ async function runDetect(box) {
   else if (j.n_exemplar_prims <= 4)
     st += ' ⚠️ very generic shape — widen the box to include ticks/details';
   document.getElementById('status').textContent = st;
-  if (j.engine === 'v2') { lastV2 = j; renderV2(); return; }
-  document.getElementById('count').textContent = j.count + ' found';
-  const t = (o) => Object.entries(o || {}).map(([k,v]) =>
-    `<tr><td>${k}</td><td>${v}</td></tr>`).join('');
-  document.getElementById('stats').innerHTML =
-    `<table><tr><td colspan=2><b>by rotation</b></td></tr>${t(j.by_rotation)}
-     <tr><td colspan=2><b>by size</b></td></tr>${t(j.by_scale)}</table>`;
-  const b = j.box_used || box;
-  let svg = rubberSvg(b[0]*Z, b[1]*Z, b[2]*Z, b[3]*Z);
-  for (const d of j.detections) {
-    const pts = d.corners.map(c => (c[0]*Z) + ',' + (c[1]*Z)).join(' ');
-    const col = d.score > 0.95 ? '#e02020' : '#e08a00';
-    const info = d.width ? `door ${d.width}` :
-      `${d.theta_deg}° · ×${d.scale}${d.mirrored ? ' · mirrored' : ''}`;
-    svg += `<polygon points="${pts}" fill="none" stroke="${col}" stroke-width="2.5">
-      <title>score ${d.score} · ${info}</title></polygon>`;
-  }
-  ovl.innerHTML = svg;
+  lastV2 = j; renderV2();
 }
 
 // ---- v2 confidence slider: re-slices the stored response, no re-query ----
@@ -203,10 +187,6 @@ document.getElementById('conf').oninput = () => {
     document.getElementById('conf').value;
   renderV2();
 };
-document.getElementById('v2engine').onchange = () => {
-  document.getElementById('confwrap').style.display =
-    document.getElementById('v2engine').checked ? 'block' : 'none';
-};
 
 // ---- cross-check against the panel schedules -----------------------------
 let lastBox = null;
@@ -221,6 +201,7 @@ document.getElementById('reconBtn').onclick = async () => {
   });
   const j = await res.json();
   if (j.error) { out.innerHTML = `<div class="hint">${j.error}</div>`; return; }
+  if (j.kind === 'doors') { renderDoorRecon(j); return; }
   const mark = s => s === 'corroborated' ? '✓'
               : s === 'plan_only' ? 'plan only' : 'schedule only';
   const rows = j.rooms.map(r =>
@@ -238,6 +219,36 @@ document.getElementById('reconBtn').onclick = async () => {
      <table><tr><td><b>room</b></td><td><b>plan</b></td>
        <td><b>circuits</b></td><td><b>status</b></td></tr>${rows}</table>`;
 };
+
+function renderDoorRecon(j) {
+  const out = document.getElementById('recon');
+  const sheetRows = j.sheets.map(s =>
+    `<tr><td>${s.sheet}</td><td>${s.doors_there}</td>
+     <td>${s.matched}/${j.n_doors}</td></tr>`).join('');
+  const flagged = j.n_doors - j.n_confirmed;
+  out.innerHTML =
+    `<div><b>${j.n_confirmed} of ${j.n_doors} doors confirmed</b> by other
+       sheets drawing the same floor${flagged
+         ? ` · <span style="color:#c47316">${flagged} on this sheet only</span>` : ''}</div>
+     <div class="hint">sheets aligned by offset-voting on hinge positions ·
+       unconfirmed doors are outlined in orange on the plan</div>
+     <table><tr><td><b>sheet</b></td><td><b>doors there</b></td>
+       <td><b>matches ours</b></td></tr>${sheetRows}</table>`;
+  // repaint overlay: unconfirmed doors in orange, width disagreements dashed
+  let svg = '';
+  for (const d of j.doors) {
+    const pts = d.corners.map(c => (c[0]*Z) + ',' + (c[1]*Z)).join(' ');
+    const ok = d.confirmed_on.length > 0;
+    svg += `<polygon points="${pts}" fill="none"
+      stroke="${ok ? '#e02020' : '#c47316'}" stroke-width="${ok ? 2.5 : 3.5}"
+      ${d.width_disagrees ? 'stroke-dasharray="6,4"' : ''}>
+      <title>door ${d.width} · ${ok
+        ? 'also on ' + d.confirmed_on.join(', ')
+        : 'THIS SHEET ONLY'}${d.width_disagrees ? ' · width disagrees!' : ''}</title>
+      </polygon>`;
+  }
+  ovl.innerHTML = svg;
+}
 
 const PALETTE = ['#e02020','#1c7ed6','#0ca678','#f076b0','#7048e8','#e8590c',
                  '#0b7285','#9c36b5','#5c940d','#d6336c','#364fc7','#f59f00'];
@@ -290,7 +301,7 @@ document.getElementById('legendBtn').onclick = async () => {
   const res = await fetch('/legend_count', {
     method: 'POST', headers: {'Content-Type': 'application/json'},
     body: JSON.stringify({page: document.getElementById('page').value,
-      engine: document.getElementById('v2engine').checked ? 'v2' : 'v1'})
+      engine: 'v2'})
   });
   const j = await res.json();
   if (j.error) { document.getElementById('status').textContent = j.error; return; }

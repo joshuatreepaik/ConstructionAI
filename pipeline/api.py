@@ -30,6 +30,7 @@ class V2State:
         self.sheets = SheetCache(doc)
         self.indexes: dict[int, SaliencyIndex] = {}
         self.schedule_page: int | None = None    # found once, then cached
+        self.door_cands: dict[int, list] = {}    # per-sheet doors, for x-sheet checks
 
     def index_for(self, page_index: int, policy: Policy) -> SaliencyIndex:
         if page_index not in self.indexes:
@@ -162,8 +163,10 @@ def detect(doc_state, page_index: int, box, any_size=True, veto_text=True,
 
 def reconcile(doc_state, page_index: int, box, schedule_page: int | None = None,
               policy: Policy = DEFAULT) -> dict:
-    """Trace-then-cross-check: run detection, then compare the room-by-room
-    counts against the document's own panel schedules."""
+    """Trace-then-cross-check against the document's own second record:
+    symbols -> the panel schedules; doors -> the other sheets that redraw the
+    same floor (this set has no door schedule table, so the other plans are
+    the independent source)."""
     from .reconcile_schedule import reconcile as run_reconcile
 
     t0 = time.time()
@@ -172,9 +175,9 @@ def reconcile(doc_state, page_index: int, box, schedule_page: int | None = None,
         v2, page_index, box, any_size=True, veto_text=True, policy=policy)
     if mode is None:
         return dets                          # the error dict
-    if mode != "symbol":
-        return {"error": "cross-check works on stamped symbols "
-                         "(trace a receptacle, not a door)"}
+
+    if mode == "door":
+        return _reconcile_doors_json(v2, page_index, dets, policy, t0)
 
     sheet = v2.sheets.get(page_index)
     report = run_reconcile(doc_state.doc, sheet, dets,
@@ -186,6 +189,7 @@ def reconcile(doc_state, page_index: int, box, schedule_page: int | None = None,
 
     return {
         "engine": "v2",
+        "kind": "schedule",
         "elapsed": round(time.time() - t0, 2),
         "plan_page": report.plan_page,
         "schedule_page": report.schedule_page,
@@ -201,6 +205,42 @@ def reconcile(doc_state, page_index: int, box, schedule_page: int | None = None,
             "circuit_text": r.circuits,
             "status": r.status,
         } for r in report.rooms],
+    }
+
+
+def _reconcile_doors_json(v2, page_index: int, dets, policy: Policy, t0):
+    from .reconcile_doors import reconcile_doors
+
+    sheet = v2.sheets.get(page_index)
+    report = reconcile_doors(v2, sheet, dets, policy)
+    if isinstance(report, dict):             # error
+        return report
+
+    accepted = [d for d in dets
+                if d.decision == "accept" and d.candidate.cls == "door"]
+    doors_json = []
+    for d, on, wbad in zip(accepted, report.confirmed_on, report.width_disagrees):
+        w = d.candidate.support["width_pt"]
+        doors_json.append({
+            "corners": [[round(float(c[0]), 2), round(float(c[1]), 2)]
+                        for c in d.corners],
+            "width": (width_label(w, sheet.scale_pt_per_ft)
+                      if sheet.scale_pt_per_ft else f"{w:.0f}pt"),
+            "confirmed_on": on,
+            "width_disagrees": wbad,
+        })
+    return {
+        "engine": "v2",
+        "kind": "doors",
+        "elapsed": round(time.time() - t0, 2),
+        "plan_page": report.plan_page,
+        "n_doors": report.n_doors,
+        "n_confirmed": report.n_confirmed,
+        "sheets": [{
+            "sheet": s.sheet_id, "page": s.page_index,
+            "doors_there": s.n_doors, "matched": s.n_matched,
+        } for s in report.sheets],
+        "doors": doors_json,
     }
 
 

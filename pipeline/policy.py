@@ -94,5 +94,17 @@ class Policy:
     # the x1.8 matches are grid targets - different devices, not receptacles
     # miscounted (measured by inspecting each off-scale hit)
 
+    # ---- cross-sheet door reconciliation ------------------------------------
+    door_xsheet_match_pt: float = 5.0
+    # sheets exported from one CAD model align to <2pt (T5 vs T8: 35/35 at
+    # 2pt); 5pt allows redraw jitter without reaching the next door over
+    door_xsheet_min_votes: int = 4
+    door_xsheet_min_frac: float = 0.25
+    # an offset must be repeated by several doors before a sheet counts as
+    # "the same floor plan" - any two unrelated sheets have SOME best offset
+    door_width_agree_pt: float = 2.0
+    # matched doors are the same physical door; widths differing by more than
+    # ~3" at 1/8" scale mean the sheets genuinely disagree - flag it
+
 
 DEFAULT = Policy()

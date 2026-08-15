@@ -9,13 +9,10 @@ WHAT THIS FILE IS
     box (`_main_cluster`). The UI lives in web/index.html.
 
 TWO ENGINES, ONE UI
-    Every request carries an `engine` field:
-      "v1" (default) - the original engine in oneshot/, kept frozen so it can
-                       serve as the control in before/after comparisons.
-      "v2"           - the staged pipeline in pipeline/, which is the
-                       architecture this project is actually proposing.
-    `scripts/compare.py` runs identical queries through both and prints the
-    results side by side.
+    The staged pipeline in pipeline/ is the engine ("v2", the default). The
+    original engine in oneshot/ is kept frozen as the experimental control;
+    pass engine: "v1" to run it. `scripts/compare.py` runs identical queries
+    through both and prints the results side by side.
 
 NOTHING HERE IS TUNED TO ONE DRAWING SET
     Sheet names come from title blocks, legend sheets are found by their own
@@ -231,7 +228,7 @@ def do_detect():
     any_size = bool(q.get("any_size", True))
     veto_text = bool(q.get("veto_text", True))
 
-    if q.get("engine") == "v2":
+    if q.get("engine", "v2") == "v2":   # v2 is the default engine
         from pipeline import api as v2api
         return jsonify(v2api.detect(STATE, page_index, box,
                                     any_size=any_size, veto_text=veto_text))
@@ -313,7 +310,7 @@ def legend_count():
         return jsonify({"error": "no document loaded - upload a PDF first"})
     q = request.get_json()
     page_index = int(q["page"])
-    if q.get("engine") == "v2":
+    if q.get("engine", "v2") == "v2":   # v2 is the default engine
         from pipeline import api as v2api
         return jsonify(v2api.legend_count(STATE, page_index))
     legend_idxs = STATE.legend_pages()

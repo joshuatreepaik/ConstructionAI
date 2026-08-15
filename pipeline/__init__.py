@@ -11,9 +11,13 @@ READ THE FILES IN THIS ORDER
     evidence.py    STAGE 3 - score every guess on one comparable scale.
     resolve.py     STAGE 4 - arbitrate, name, and scope the survivors.
     reconcile_schedule.py
-                   cross-check counts against the document's own schedule
-                   tables - the one stage that checks against something the
-                   system did not produce itself.
+                   cross-check symbol counts against the document's own
+                   schedule tables - checking against something the system
+                   did not produce itself.
+    reconcile_doors.py
+                   cross-check doors against the OTHER SHEETS that redraw the
+                   same floor (this set has no door schedule table; the other
+                   trades' plans are the independent source).
     api.py         the facade the web app calls.
 
 THE PROBLEM THIS SHAPE SOLVES

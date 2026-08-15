@@ -106,12 +106,14 @@ genuinely different geometry, not the same picture at two sizes. Tracing any doo
 to a structural detector that looks for an arc with a leaf hinged at its centre, finds
 every width, and reports the width of each, since the arc radius *is* the door width.
 
-**Check its own answer.** A drawing set states its quantities twice, once as symbols on the
-plan and once as schedules. After any symbol search, the **Cross-check vs panel schedules**
-button finds the schedule tables (pasted into the PDF as images), OCRs them, and reports
-room by room where the plan and the schedules agree. It is the check a human estimator does
-by hand before trusting a number. On the sample set: 22 rooms corroborated, none
-contradicted. Needs macOS for the OCR; everything else runs anywhere.
+**Check its own answer.** A drawing set states its quantities more than once, and every
+search ends with a cross-check button. Trace a receptacle and it finds the panel-schedule
+tables (pasted into the PDF as images), OCRs them, and reports room by room where the plan
+and the schedules agree: 22 rooms corroborated, none contradicted, on the sample set. Trace
+a door and it compares against the other sheets that redraw the same floor, aligning each
+sheet by letting the door hinges vote on the offset: every door on the architectural plan
+is confirmed by up to eight other trades' sheets. It is the check a human estimator does by
+hand before trusting a number. The schedule OCR needs macOS; everything else runs anywhere.
 
 **Say how sure it is, and why.** Every detection carries its evidence score, so the
 confidence slider filters results that were already scored instead of changing what the
@@ -172,7 +174,8 @@ Start with the diagram, then go in this order. It's about 700 lines.
 | `pipeline/proposers/` | **Stage 2**, three ways of generating guesses |
 | `pipeline/evidence.py` | **Stage 3**, score every guess on one comparable scale |
 | `pipeline/resolve.py` | **Stage 4**, arbitrate, name, scope |
-| `pipeline/reconcile_schedule.py` | The cross-check against the document's own schedule tables |
+| `pipeline/reconcile_schedule.py` | Cross-check symbols against the document's schedule tables |
+| `pipeline/reconcile_doors.py` | Cross-check doors against the other sheets drawing the same floor |
 | `pipeline/api.py` | What `app.py` actually calls |
 
 ```
