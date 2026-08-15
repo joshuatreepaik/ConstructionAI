@@ -9,6 +9,7 @@ USAGE
     defaults: data.pdf, page 26 (E4 power plan), schedule page auto-detected
 """
 
+import os
 import sys
 
 sys.path.insert(0, ".")
@@ -16,6 +17,8 @@ sys.path.insert(0, ".")
 import pymupdf
 
 from pipeline import api
+
+os.makedirs("out", exist_ok=True)      # out/ is gitignored; fresh clones lack it
 
 # One duplex receptacle on E4, used as the one-shot exemplar.
 RECPT_BOX = (431.0, 346.0, 445.0, 362.0)

@@ -2,38 +2,99 @@
 <meta charset="utf-8">
 <title>One-shot symbol finder</title>
 <style>
-  body { margin:0; font:14px system-ui; display:flex; height:100vh;
+  :root {
+    --paper:#faf9f5; --panel:#f1efe8; --ink:#22303e; --muted:#5c6b7a;
+    --line:#ddd9cf; --blue:#2e5f8a; --red:#c2402f; --orange:#d78327;
+    --mono:ui-monospace,"SF Mono",Menlo,monospace;
+  }
+  body { margin:0; display:flex; height:100vh; color:var(--ink);
+         font:13.5px/1.45 "Avenir Next","Helvetica Neue",system-ui,sans-serif;
          -webkit-user-select:none; user-select:none; }
-  #side { width:270px; padding:14px; border-right:1px solid #ccc; overflow-y:auto; flex-shrink:0; }
-  #side h2 { margin:0 0 6px; font-size:16px; }
-  #wrap { flex:1; overflow:auto; position:relative; background:#888; }
+  #side { width:300px; padding:16px 18px 28px; overflow-y:auto; flex-shrink:0;
+          background:var(--paper); border-right:1px solid var(--line);
+          box-sizing:border-box; }
+  #titleblock { border:1.5px solid var(--ink); padding:10px 12px; margin-bottom:14px; }
+  #titleblock h2 { margin:0; font-size:15px; letter-spacing:.01em; }
+  #docname { font:10.5px var(--mono); color:var(--muted); word-break:break-all;
+             margin-top:3px; }
+  .eyebrow { font:10.5px var(--mono); letter-spacing:.13em; text-transform:uppercase;
+             color:var(--blue); margin:16px 0 6px; }
+  .sec { border-top:1px solid var(--line); margin-top:14px; }
+  .hint { color:var(--muted); font-size:11.5px; }
+  #status { color:var(--muted); font-size:11.5px; font-style:italic;
+            min-height:16px; margin-top:8px; }
+  select { width:100%; padding:5px 6px; font:12.5px var(--mono);
+           color:var(--ink); background:#fff; border:1px solid var(--line);
+           border-radius:0; margin:2px 0 6px; }
+  input[type=file] { width:100%; font-size:11px; color:var(--muted); margin:4px 0 0; }
+  input[type=checkbox], input[type=range] { accent-color:var(--blue); }
+  label { display:block; margin:3px 0; }
+  .sliderrow { display:flex; align-items:center; gap:8px; margin:5px 0; }
+  .sliderrow .sl-label { flex:none; font-size:12px; }
+  .sliderrow input { flex:1; min-width:0; }
+  .sliderrow .sl-val { flex:none; font:11.5px var(--mono); color:var(--ink);
+                       min-width:34px; text-align:right; }
+  button { display:block; width:100%; margin:6px 0 0; padding:7px 10px;
+           font:12.5px "Avenir Next","Helvetica Neue",system-ui,sans-serif;
+           font-weight:600; color:var(--ink); text-align:left;
+           background:var(--panel); border:1px solid var(--ink); border-radius:0;
+           cursor:pointer; }
+  button:hover { background:#e9e4d6; }
+  button:active { transform:translateY(1px); }
+  #count { display:flex; gap:18px; margin:10px 0 2px; }
+  #count:empty { margin:0; }
+  .countcell .num { font-size:30px; font-weight:700; line-height:1.1;
+                    font-variant-numeric:tabular-nums; }
+  .countcell .num.red { color:var(--red); }
+  .countcell .num.orange { color:var(--orange); }
+  .countcell .lab { font:10px var(--mono); letter-spacing:.1em;
+                    text-transform:uppercase; color:var(--muted); }
+  table.tbl { width:100%; border-collapse:collapse; margin-top:6px;
+              font-size:12px; font-variant-numeric:tabular-nums; }
+  .tbl th { text-align:left; font:10px var(--mono); letter-spacing:.09em;
+            text-transform:uppercase; color:var(--muted); font-weight:500;
+            padding:3px 8px 3px 0; border-bottom:1px solid var(--ink); }
+  .tbl td { padding:3px 8px 3px 0; border-bottom:1px solid var(--line); }
+  .tbl td.n, .tbl th.n { text-align:right; padding-right:2px; }
+  .tbl td.n { font-weight:600; }
+  .tbl tr.warn td { color:var(--orange); }
+  .tbl tr.click { cursor:pointer; }
+  .tbl tr.click:hover td { background:#f2efe6; }
+  .tbl tr.sel td { background:#e4ecf4; }
+  .ok { color:var(--blue); font-weight:700; }
+  .recap { font-size:12.5px; margin-top:8px; }
+  .recap b { font-variant-numeric:tabular-nums; }
+  #wrap { flex:1; overflow:auto; position:relative; background:#8b9299; }
   #stage { position:relative; transform-origin:0 0; }
   #sheet { display:block; }
   #ovl { position:absolute; inset:0; cursor:crosshair; }
-  .hint { color:#555; font-size:12px; }
-  table { border-collapse:collapse; margin-top:6px; }
-  td { padding:1px 8px 1px 0; }
-  #count { font-size:28px; font-weight:700; }
-  button, select, input[type=file] { margin:3px 0; max-width:240px; }
-  label { display:block; margin:2px 0; }
-  #docname { font-weight:600; font-size:12px; word-break:break-all; }
 </style>
 <div id="side">
-  <h2>One-shot symbol finder</h2>
+  <div id="titleblock">
+    <h2>One-shot symbol finder</h2>
+    <div id="docname"></div>
+  </div>
+  <p class="hint" style="margin:0 0 4px">Drag a box around ONE symbol.
+  Everything similar gets found: rotated, mirrored, resized, or partially
+  covered. Tracing a door finds doors of every width.</p>
+
+  <div class="eyebrow">Document</div>
+  <select id="page"></select>
   <input type="file" id="file" accept="application/pdf">
-  <div id="docname"></div>
-  <p class="hint">Drag a box around ONE symbol on the sheet. Everything similar
-  gets found — rotated, mirrored, resized, or partially covered. Tracing a
-  door finds doors of every width.</p>
-  <label>Sheet: <select id="page"></select></label>
+
+  <div class="eyebrow">Search</div>
   <label><input type="checkbox" id="anysize" checked> match any size</label>
   <label><input type="checkbox" id="veto" checked> ignore text-labeled symbols</label>
-  <label id="confwrap">Confidence ≥ <span id="confval">80</span>%
-    <input type="range" id="conf" min="15" max="98" value="80"></label>
-  <label>Zoom <input type="range" id="zoom" min="25" max="200" value="50">%</label>
+  <div class="sliderrow" id="confwrap"><span class="sl-label">Confidence</span>
+    <input type="range" id="conf" min="15" max="98" value="80">
+    <span class="sl-val">≥<span id="confval">80</span>%</span></div>
+  <div class="sliderrow"><span class="sl-label">Zoom</span>
+    <input type="range" id="zoom" min="25" max="200" value="50">
+    <span class="sl-val">%</span></div>
   <button id="legendBtn">⚡ Auto-count everything via legend</button>
   <button id="reconBtn" style="display:none">🧾 Cross-check vs panel schedules</button>
-  <div id="status" class="hint">draw a box, or hit auto-count</div>
+  <div id="status">draw a box, or hit auto-count</div>
+
   <div id="count"></div>
   <div id="stats"></div>
   <div id="recon"></div>
@@ -120,7 +181,7 @@ ovl.onmouseup = e => {
 function rubberSvg(x0, y0, x1, y1) {
   return `<rect x="${Math.min(x0,x1)}" y="${Math.min(y0,y1)}"
     width="${Math.abs(x1-x0)}" height="${Math.abs(y1-y0)}"
-    fill="rgba(30,120,255,.15)" stroke="#1e78ff" stroke-width="2"/>`;
+    fill="rgba(46,95,138,.14)" stroke="#2e5f8a" stroke-width="2"/>`;
 }
 async function runDetect(box) {
   document.getElementById('status').textContent = 'searching…';
@@ -161,8 +222,11 @@ function renderV2() {
   const shown = j.detections.filter(d => d.confidence >= minConf);
   const confident = shown.filter(d => d.confidence >= j.conf_accept).length;
   const flagged = shown.length - confident;
-  document.getElementById('count').textContent =
-    `${confident} confident + ${flagged} flagged`;
+  document.getElementById('count').innerHTML =
+    `<div class="countcell"><div class="num red">${confident}</div>
+       <div class="lab">confident</div></div>
+     <div class="countcell"><div class="num orange">${flagged}</div>
+       <div class="lab">flagged</div></div>`;
   const b = j.box_used;
   let svg = b ? rubberSvg(b[0]*Z, b[1]*Z, b[2]*Z, b[3]*Z) : '';
   for (const d of shown) {
@@ -174,13 +238,15 @@ function renderV2() {
       <title>${d.confidence}% · ${info}</title></polygon>`;
   }
   ovl.innerHTML = svg;
-  const t = (o) => Object.entries(o || {}).map(([k,v]) =>
-    `<tr><td>${k}</td><td>${v}</td></tr>`).join('');
+  const t = (o, head) => Object.keys(o || {}).length
+    ? `<table class="tbl"><tr><th>${head}</th><th class="n">count</th></tr>` +
+      Object.entries(o).map(([k, v]) =>
+        `<tr><td>${k}</td><td class="n">${v}</td></tr>`).join('') + '</table>'
+    : '';
   document.getElementById('stats').innerHTML =
     `<div class="hint">red = confident (≥${j.conf_accept}%) · orange = flagged ·
-     drag the slider to reveal or hide uncertain hits</div>
-    <table><tr><td colspan=2><b>by rotation</b></td></tr>${t(j.by_rotation)}
-     <tr><td colspan=2><b>by size</b></td></tr>${t(j.by_scale)}</table>`;
+     drag the slider to reveal or hide uncertain hits</div>` +
+    t(j.by_rotation, 'rotation') + t(j.by_scale, 'size');
 }
 document.getElementById('conf').oninput = () => {
   document.getElementById('confval').textContent =
@@ -202,38 +268,42 @@ document.getElementById('reconBtn').onclick = async () => {
   const j = await res.json();
   if (j.error) { out.innerHTML = `<div class="hint">${j.error}</div>`; return; }
   if (j.kind === 'doors') { renderDoorRecon(j); return; }
-  const mark = s => s === 'corroborated' ? '✓'
-              : s === 'plan_only' ? 'plan only' : 'schedule only';
-  const rows = j.rooms.map(r =>
-    `<tr${r.status === 'corroborated' ? '' : ' style="color:#c47316"'}>
-     <td>${r.room}</td><td>${r.symbols}</td><td>${r.circuits}</td>
+  const rows = j.rooms.map(r => {
+    const ok = r.status === 'corroborated';
+    const mark = ok ? '<span class="ok">✓</span>'
+               : r.status === 'plan_only' ? 'plan only' : 'schedule only';
+    return `<tr${ok ? '' : ' class="warn"'}>
+     <td>${r.room}</td><td class="n">${r.symbols}</td><td class="n">${r.circuits}</td>
      <td title="${(r.circuit_text || []).join('\n').replace(/"/g,'&quot;')}">
-       ${mark(r.status)}</td></tr>`).join('');
+       ${mark}</td></tr>`;
+  }).join('');
   out.innerHTML =
-    `<div><b>${j.n_corroborated} rooms corroborated</b> by the schedules
+    `<div class="eyebrow">Cross-check · panel schedules</div>
+     <div class="recap"><b>${j.n_corroborated} rooms corroborated</b>
        (sheet p${j.schedule_page + 1}, ${j.n_circuits} circuits read)</div>
-     <div class="hint">counted ${j.n_detections} same-size symbols
-       (${j.n_excluded_scale} other-size hits set aside,
-        ${j.n_unattributed} outside any tagged room) ·
-        hover a row to see the circuit text</div>
-     <table><tr><td><b>room</b></td><td><b>plan</b></td>
-       <td><b>circuits</b></td><td><b>status</b></td></tr>${rows}</table>`;
+     <div class="hint">counted ${j.n_detections} same-size symbols ·
+       ${j.n_excluded_scale} other-size set aside ·
+       ${j.n_unattributed} outside tagged rooms ·
+       hover a row for the circuit text</div>
+     <table class="tbl"><tr><th>room</th><th class="n">plan</th>
+       <th class="n">circuits</th><th>status</th></tr>${rows}</table>`;
 };
 
 function renderDoorRecon(j) {
   const out = document.getElementById('recon');
   const sheetRows = j.sheets.map(s =>
-    `<tr><td>${s.sheet}</td><td>${s.doors_there}</td>
-     <td>${s.matched}/${j.n_doors}</td></tr>`).join('');
+    `<tr><td>${s.sheet}</td><td class="n">${s.doors_there}</td>
+     <td class="n">${s.matched}/${j.n_doors}</td></tr>`).join('');
   const flagged = j.n_doors - j.n_confirmed;
   out.innerHTML =
-    `<div><b>${j.n_confirmed} of ${j.n_doors} doors confirmed</b> by other
-       sheets drawing the same floor${flagged
-         ? ` · <span style="color:#c47316">${flagged} on this sheet only</span>` : ''}</div>
+    `<div class="eyebrow">Cross-check · sibling sheets</div>
+     <div class="recap"><b>${j.n_confirmed} of ${j.n_doors} doors confirmed</b>
+       by other sheets drawing the same floor${flagged
+         ? ` · <span style="color:var(--orange)">${flagged} on this sheet only</span>` : ''}</div>
      <div class="hint">sheets aligned by offset-voting on hinge positions ·
        unconfirmed doors are outlined in orange on the plan</div>
-     <table><tr><td><b>sheet</b></td><td><b>doors there</b></td>
-       <td><b>matches ours</b></td></tr>${sheetRows}</table>`;
+     <table class="tbl"><tr><th>sheet</th><th class="n">doors there</th>
+       <th class="n">match</th></tr>${sheetRows}</table>`;
   // repaint overlay: unconfirmed doors in orange, width disagreements dashed
   let svg = '';
   for (const d of j.doors) {
@@ -273,18 +343,17 @@ function renderLegend() {
   ovl.innerHTML = legendSvg();
   const total = legendResults.reduce((a, r) => a + r.count, 0);
   const allSel = legendSelected === null;
-  let rows = `<tr data-i="all" style="cursor:pointer;${allSel ? 'background:#dde9ff' : ''}">
-    <td style="font-weight:700">${total}</td><td><b>ALL SYMBOLS</b></td></tr>`;
+  let rows = `<tr data-i="all" class="click${allSel ? ' sel' : ''}">
+    <td class="n" style="font-weight:700">${total}</td><td><b>ALL SYMBOLS</b></td></tr>`;
   legendResults.forEach((r, i) => {
     const col = PALETTE[i % PALETTE.length];
-    const sel = legendSelected === i;
-    rows += `<tr data-i="${i}" style="cursor:pointer;${sel ? 'background:#dde9ff' : ''}">
-      <td style="color:${col};font-weight:700">${r.count}</td>
+    rows += `<tr data-i="${i}" class="click${legendSelected === i ? ' sel' : ''}">
+      <td class="n" style="color:${col}">${r.count}</td>
       <td style="color:${col}">${r.label}</td></tr>`;
   });
   document.getElementById('stats').innerHTML =
     `<div class="hint">click a row to isolate that symbol · click again for all</div>
-     <table>${rows}</table>`;
+     <table class="tbl"><tr><th class="n">count</th><th>legend entry</th></tr>${rows}</table>`;
   document.querySelectorAll('#stats tr').forEach(tr => {
     tr.onclick = () => {
       const v = tr.getAttribute('data-i');

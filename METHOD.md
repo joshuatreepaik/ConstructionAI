@@ -113,6 +113,14 @@ became obvious that wall hatching dominates it, with a single fingerprint bucket
 holding 15.3% of every line pair on the sheet. Borrowing inverse document
 frequency from text search fixed it.
 
+**Door reconciliation checks other sheets, not a schedule.** The plan assumed a
+door schedule table to reconcile against. Measurement showed this set has none:
+the "DOOR SCHEDULE" on the title sheet is specification notes, the door type
+tags exist only in the legend text, and doors on the plan carry no adjacent
+marks. What the set does have is the same floor drawn once per trade, so the
+built check matches doors hinge-to-hinge across sheets instead, recovering each
+sheet's plan offset by letting the hinges vote on the translation.
+
 Designed and still unbuilt: the learned verification layer, the coverage report,
 negative exemplars, and hand-counted ground truth, without which there are no
 honest precision and recall numbers. The geometric stages carried more of the

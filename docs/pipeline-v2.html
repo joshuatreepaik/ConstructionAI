@@ -135,7 +135,7 @@ policy file and the calibration loop stand beside the pipeline, not inside it.</
 <div class="eyebrow">Fig. 1 — The pipeline</div>
 <div class="scrollbox">
 <figure>
-<svg viewBox="0 0 860 866" role="img" aria-label="Six-stage pipeline. A vector PDF is parsed once into a Sheet; a saliency index learns which fingerprints are rare on that sheet; three proposers (rigid, parametric, text-anchored) emit one shared Candidate type; an evidence stage scores each against local clutter; a resolution stage arbitrates, names, and scopes them; a decide stage outputs accept, review, and reject with reasons. A policy file feeds thresholds sideways into stages 1, 3, 4 and 5, and an offline calibration loop sets the policy from measured score distributions.">
+<svg viewBox="0 0 860 990" role="img" aria-label="The pipeline. A vector PDF is parsed once into a Sheet; a saliency index learns which fingerprints are rare on that sheet; three proposers (rigid, parametric, text-anchored) emit one shared Candidate type; an evidence stage scores each against local clutter; a resolution stage arbitrates, names, and scopes them; a decide stage outputs accept, review, and reject with reasons; a final cross-check confirms the count against the drawing's own records, symbols against the OCR'd panel schedules and doors against the sibling sheets that redraw the same floor. A policy file feeds thresholds sideways into stages 1, 3, 4 and 5, and an offline calibration loop sets the policy from measured score distributions.">
   <defs>
     <marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
       <path d="M0 0 L10 5 L0 10 z" fill="currentColor"/>
@@ -226,10 +226,29 @@ policy file and the calibration loop stand beside the pipeline, not inside it.</
   <text x="354" y="752" text-anchor="middle" class="rejecttext">reject + reason</text>
   <text x="126" y="778" class="detail">confidence slider re-slices this split live — no re-query</text>
   <line x1="230" y1="788" x2="230" y2="814" class="flow" marker-end="url(#a)"/>
+  <text x="242" y="807" class="datalabel">accepted + review counts</text>
+
+  <!-- cross-check -->
+  <rect x="110" y="818" width="510" height="116" class="stagebox"/>
+  <text x="126" y="840" class="stagenum">CROSS-CHECK</text>
+  <text x="126" y="860" class="stagename">The drawing confirms the count</text>
+  <text x="95" y="856" text-anchor="end" class="sidenote">a wrong count that</text>
+  <text x="95" y="870" text-anchor="end" class="sidenote">looks right is the</text>
+  <text x="95" y="884" text-anchor="end" class="sidenote">expensive kind</text>
+
+  <rect x="126" y="872" width="238" height="48" class="innerbox"/>
+  <text x="245" y="892" text-anchor="middle" class="boxname">symbols vs panel schedules</text>
+  <text x="245" y="909" text-anchor="middle" class="detail">tables OCR'd, agreement per room</text>
+
+  <rect x="376" y="872" width="234" height="48" class="innerbox"/>
+  <text x="493" y="892" text-anchor="middle" class="boxname">doors vs sibling sheets</text>
+  <text x="493" y="909" text-anchor="middle" class="detail">hinges vote each sheet's offset</text>
+
+  <line x1="230" y1="934" x2="230" y2="958" class="flow" marker-end="url(#a)"/>
 
   <!-- report -->
-  <rect x="110" y="818" width="510" height="38" class="innerbox"/>
-  <text x="365" y="842" text-anchor="middle" class="boxname">count · review queue · schedule reconciliation · audit trail</text>
+  <rect x="110" y="962" width="510" height="38" class="innerbox"/>
+  <text x="365" y="986" text-anchor="middle" class="boxname">count · review queue · corroborated / flagged · audit trail</text>
 
   <!-- policy rail -->
   <rect x="660" y="446" width="185" height="70" class="stagebox"/>
@@ -254,7 +273,9 @@ policy file and the calibration loop stand beside the pipeline, not inside it.</
 the actual types in <code>pipeline/types.py</code>. Dashed arrows carry thresholds out of the
 policy file, which the offline calibration loop sets from measured score distributions —
 so decisions are derived rather than tuned inline. Note the opposite error preferences in the
-margin: Stage&nbsp;2 is allowed to over-guess, Stage&nbsp;5 is not.</figcaption>
+margin: Stage&nbsp;2 is allowed to over-guess, Stage&nbsp;5 is not. The cross-check at the bottom
+is the one stage that verifies against something the system did not produce: the drawing's own
+schedule tables for symbols, and the sibling sheets that redraw the same floor for doors.</figcaption>
 </figure>
 </div>
 

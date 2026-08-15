@@ -11,17 +11,26 @@ drawings use different symbols.
 
 ## The pipeline
 
-![Six stage pipeline: parse the sheet once, learn which shapes are rare on it, propose candidates generously, score them against local clutter, arbitrate and name them, then decide with a review queue.](docs/pipeline.svg)
+![The pipeline: parse the sheet once, learn which shapes are rare on it, propose candidates generously, score them against local clutter, arbitrate and name them, decide with a review queue, then cross-check the count against the drawing's own records.](docs/pipeline.svg)
 
 Data flows top to bottom, and the label on each arrow is the actual type in
 `pipeline/types.py`. Thresholds come in from the side, out of a single policy file that an
 offline calibration run fills in from measured score distributions.
 
-The two red notes in the margin are the reason the pipeline splits where it does. Stage 2
+The red notes in the margin are the reason the pipeline splits where it does. Stage 2
 is deliberately trigger-happy, because a candidate it never proposes can't be recovered
 later by any amount of cleverness. Stage 5 is deliberately strict, because a wrong count
 that looks confident is worse than one that admits doubt. Those want different thresholds,
 so they're different stages.
+
+The cross-check at the bottom exists because a count cannot tell you when it's wrong. A
+total that is silently missing nine doors looks exactly like a correct total (that
+happened; the story is under Measured, below). So the last stage verifies against records
+the system didn't produce. Symbol counts are checked against the drawing's own schedule
+tables, and doors are checked against the other trades' sheets, each of which redraws the
+same floor. Agreement comes back as corroboration, disagreement as a flag worth a human
+glance, and when the trades' sheets disagree with each other, that is a coordination error
+in the documents themselves, found before anyone is on site.
 
 ## Run it
 
@@ -33,8 +42,9 @@ python3 -m venv .venv && .venv/bin/pip install pymupdf numpy scipy flask
 
 Drop in any CAD-exported PDF, or use the 28-sheet fit-out set that ships with it. Pick a
 sheet, zoom in, drag a box around one symbol. The confidence slider re-slices the results
-without re-running anything. The **Auto-count everything via legend** button skips the
-tracing entirely.
+without re-running anything, the **Auto-count everything via legend** button skips the
+tracing entirely, and after any search the **Cross-check** button asks the rest of the
+drawing set whether it agrees with the count.
 
 ```bash
 .venv/bin/python scripts/demo.py 25       # one sheet, writes an annotated PNG
@@ -111,7 +121,7 @@ search ends with a cross-check button. Trace a receptacle and it finds the panel
 tables (pasted into the PDF as images), OCRs them, and reports room by room where the plan
 and the schedules agree: 22 rooms corroborated, none contradicted, on the sample set. Trace
 a door and it compares against the other sheets that redraw the same floor, aligning each
-sheet by letting the door hinges vote on the offset: every door on the architectural plan
+sheet by letting the door hinges vote on the offset: every accepted door on the sample set
 is confirmed by up to eight other trades' sheets. It is the check a human estimator does by
 hand before trusting a number. The schedule OCR needs macOS; everything else runs anywhere.
 
@@ -125,9 +135,9 @@ algorithm looks for.
 |---|---|
 | Stage 1 occurrence filter | switched off 1 fingerprint bucket holding **15.3%** of all line pairs, the wall hatching |
 | E4 receptacles | **163 confident, 23 flagged** for review |
-| Doors per sheet | **35**, up from 26 before the hinge-dedupe fix |
-| Cross-sheet check | T5 and T8 both give **33** standard doors, and E4 agrees independently |
-| Reconciliation | **22 rooms corroborated**, 11 flagged, 0 contradicted |
+| Doors proposed per sheet | **35**, up from 26 before the hinge-dedupe fix |
+| Schedule cross-check | **22 rooms corroborated**, 11 flagged, 0 contradicted |
+| Door cross-check | every accepted door confirmed by up to **8** other trades' sheets, 0 contradicted |
 | Query latency | 0.4 to 2 seconds per trace on a sheet with 33,000 primitives |
 
 That door number moved late and the reason is worth knowing. A duplicate-removal rule was
@@ -162,7 +172,7 @@ columns.
 
 ## Reading the code
 
-Start with the diagram, then go in this order. It's about 700 lines.
+Start with the diagram, then go in this order. It's about 1,400 lines all told.
 
 | File | What it is |
 |---|---|
@@ -183,7 +193,7 @@ app.py              web server and request handling
 web/index.html      the UI
 pipeline/           the architecture above     <- read this
 oneshot/            the earlier engine, kept as a baseline to compare against
-scripts/            demo, reconciliation, exemplar discovery
+scripts/            demo, reconciliation, exemplar discovery, engine comparison
 docs/               pipeline diagram
 METHOD.md           research basis and the academic lineage
 ```
