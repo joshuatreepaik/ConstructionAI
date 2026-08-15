@@ -10,6 +10,10 @@ READ THE FILES IN THIS ORDER
     proposers/     STAGE 2 - three ways to generate location guesses.
     evidence.py    STAGE 3 - score every guess on one comparable scale.
     resolve.py     STAGE 4 - arbitrate, name, and scope the survivors.
+    reconcile_schedule.py
+                   cross-check counts against the document's own schedule
+                   tables - the one stage that checks against something the
+                   system did not produce itself.
     api.py         the facade the web app calls.
 
 THE PROBLEM THIS SHAPE SOLVES

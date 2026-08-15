@@ -81,5 +81,18 @@ class Policy:
     # apart at a shared jamb and are DISTINCT doors (measured on T8), so
     # dedupe must be a small absolute radius, never a fraction of width
 
+    # ---- schedule reconciliation --------------------------------------------
+    room_tag_re: str = r"[1-9]\d{2}"
+    # room tags on this set are 3-digit numbers (2nd floor -> 2xx); the
+    # leading [1-9] rejects "025"-style dimension fragments
+    room_attribute_max_pt: float = 150.0
+    # ~20 ft at the sheet's 1/8" scale: a receptacle further than that from
+    # every room tag is in an untagged corridor - report it unattributed
+    # rather than assign it to whichever room is least far away
+    reconcile_scale_band: tuple = (0.7, 1.15)
+    # same-size instances only: on E4 the x0.5 matches are junction boxes and
+    # the x1.8 matches are grid targets - different devices, not receptacles
+    # miscounted (measured by inspecting each off-scale hit)
+
 
 DEFAULT = Policy()

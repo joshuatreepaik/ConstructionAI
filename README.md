@@ -107,9 +107,11 @@ to a structural detector that looks for an arc with a leaf hinged at its centre,
 every width, and reports the width of each, since the arc radius *is* the door width.
 
 **Check its own answer.** A drawing set states its quantities twice, once as symbols on the
-plan and once as schedules. `scripts/reconcile.py` counts receptacles on the plan, OCRs the
-panel schedule tables, and reports where the two agree, room by room. It is the check a
-human estimator does by hand before trusting a number.
+plan and once as schedules. After any symbol search, the **Cross-check vs panel schedules**
+button finds the schedule tables (pasted into the PDF as images), OCRs them, and reports
+room by room where the plan and the schedules agree. It is the check a human estimator does
+by hand before trusting a number. On the sample set: 22 rooms corroborated, none
+contradicted. Needs macOS for the OCR; everything else runs anywhere.
 
 **Say how sure it is, and why.** Every detection carries its evidence score, so the
 confidence slider filters results that were already scored instead of changing what the
@@ -123,7 +125,7 @@ algorithm looks for.
 | E4 receptacles | **163 confident, 23 flagged** for review |
 | Doors per sheet | **35**, up from 26 before the hinge-dedupe fix |
 | Cross-sheet check | T5 and T8 both give **33** standard doors, and E4 agrees independently |
-| Reconciliation | **22 rooms corroborated**, 12 flagged, 0 contradicted |
+| Reconciliation | **22 rooms corroborated**, 11 flagged, 0 contradicted |
 | Query latency | 0.4 to 2 seconds per trace on a sheet with 33,000 primitives |
 
 That door number moved late and the reason is worth knowing. A duplicate-removal rule was
@@ -170,6 +172,7 @@ Start with the diagram, then go in this order. It's about 700 lines.
 | `pipeline/proposers/` | **Stage 2**, three ways of generating guesses |
 | `pipeline/evidence.py` | **Stage 3**, score every guess on one comparable scale |
 | `pipeline/resolve.py` | **Stage 4**, arbitrate, name, scope |
+| `pipeline/reconcile_schedule.py` | The cross-check against the document's own schedule tables |
 | `pipeline/api.py` | What `app.py` actually calls |
 
 ```

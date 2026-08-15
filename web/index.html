@@ -33,9 +33,11 @@
     <input type="range" id="conf" min="15" max="98" value="80"></label>
   <label>Zoom <input type="range" id="zoom" min="25" max="200" value="50">%</label>
   <button id="legendBtn">⚡ Auto-count everything via legend</button>
+  <button id="reconBtn" style="display:none">🧾 Cross-check vs panel schedules</button>
   <div id="status" class="hint">draw a box, or hit auto-count</div>
   <div id="count"></div>
   <div id="stats"></div>
+  <div id="recon"></div>
 </div>
 <div id="wrap"><div id="stage">
   <img id="sheet" draggable="false"><svg id="ovl"></svg>
@@ -133,6 +135,11 @@ async function runDetect(box) {
   });
   const j = await res.json();
   if (j.error) { document.getElementById('status').textContent = j.error; return; }
+  // cross-check applies to v2 symbol results (needs the schedule OCR path)
+  lastBox = box;
+  document.getElementById('recon').innerHTML = '';
+  document.getElementById('reconBtn').style.display =
+    (j.engine === 'v2' && j.mode === 'symbol') ? '' : 'none';
   let st = `${j.elapsed}s · exemplar has ${j.n_exemplar_prims} primitives` +
     (j.n_traced_prims > j.n_exemplar_prims
       ? ` (${j.n_traced_prims - j.n_exemplar_prims} stray traced bits ignored)` : '');
@@ -199,6 +206,37 @@ document.getElementById('conf').oninput = () => {
 document.getElementById('v2engine').onchange = () => {
   document.getElementById('confwrap').style.display =
     document.getElementById('v2engine').checked ? 'block' : 'none';
+};
+
+// ---- cross-check against the panel schedules -----------------------------
+let lastBox = null;
+document.getElementById('reconBtn').onclick = async () => {
+  if (!lastBox) return;
+  const out = document.getElementById('recon');
+  out.innerHTML = '<div class="hint">reading the panel schedules…</div>';
+  const res = await fetch('/reconcile', {
+    method: 'POST', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({ page: document.getElementById('page').value,
+                           box: lastBox })
+  });
+  const j = await res.json();
+  if (j.error) { out.innerHTML = `<div class="hint">${j.error}</div>`; return; }
+  const mark = s => s === 'corroborated' ? '✓'
+              : s === 'plan_only' ? 'plan only' : 'schedule only';
+  const rows = j.rooms.map(r =>
+    `<tr${r.status === 'corroborated' ? '' : ' style="color:#c47316"'}>
+     <td>${r.room}</td><td>${r.symbols}</td><td>${r.circuits}</td>
+     <td title="${(r.circuit_text || []).join('\n').replace(/"/g,'&quot;')}">
+       ${mark(r.status)}</td></tr>`).join('');
+  out.innerHTML =
+    `<div><b>${j.n_corroborated} rooms corroborated</b> by the schedules
+       (sheet p${j.schedule_page + 1}, ${j.n_circuits} circuits read)</div>
+     <div class="hint">counted ${j.n_detections} same-size symbols
+       (${j.n_excluded_scale} other-size hits set aside,
+        ${j.n_unattributed} outside any tagged room) ·
+        hover a row to see the circuit text</div>
+     <table><tr><td><b>room</b></td><td><b>plan</b></td>
+       <td><b>circuits</b></td><td><b>status</b></td></tr>${rows}</table>`;
 };
 
 const PALETTE = ['#e02020','#1c7ed6','#0ca678','#f076b0','#7048e8','#e8590c',

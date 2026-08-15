@@ -29,6 +29,7 @@ class V2State:
     def __init__(self, doc):
         self.sheets = SheetCache(doc)
         self.indexes: dict[int, SaliencyIndex] = {}
+        self.schedule_page: int | None = None    # found once, then cached
 
     def index_for(self, page_index: int, policy: Policy) -> SaliencyIndex:
         if page_index not in self.indexes:
@@ -83,27 +84,39 @@ def _exemplar_from_box(sheet: Sheet, box, policy: Policy):
     return _main_cluster(traced, thr=max(3.0, 0.15 * diag), box=box), traced
 
 
-def detect(doc_state, page_index: int, box, any_size=True, veto_text=True,
-           policy: Policy = DEFAULT) -> dict:
-    t0 = time.time()
-    v2 = get_v2(doc_state)
+def _run_detection(v2: V2State, page_index: int, box, any_size, veto_text,
+                   policy: Policy):
+    """The trace-to-detections path, shared by detect() and reconcile().
+
+    Returns (mode, dets, exemplar, traced) or (None, error_dict, None, None).
+    """
     sheet = v2.sheets.get(page_index)
     exemplar, traced = _exemplar_from_box(sheet, box, policy)
     if exemplar is None:
-        return {"error": f"only {len(traced)} primitives fully inside the box - "
-                         "trace a little wider around one clean symbol"}
-
+        err = {"error": f"only {len(traced)} primitives fully inside the box - "
+                        "trace a little wider around one clean symbol"}
+        return None, err, None, None
     index = v2.index_for(page_index, policy)
-
     if parametric.looks_like_door(exemplar, policy):
         cands = parametric.propose(sheet.primitives, policy)
         mode = "door"
     else:
         cands = rigid.propose(index, exemplar, policy, any_size=any_size)
         mode = "symbol"
-
     dets = resolve([(c, score(c, index, policy)) for c in cands],
                    sheet, policy, veto_text=veto_text)
+    return mode, dets, exemplar, traced
+
+
+def detect(doc_state, page_index: int, box, any_size=True, veto_text=True,
+           policy: Policy = DEFAULT) -> dict:
+    t0 = time.time()
+    v2 = get_v2(doc_state)
+    sheet = v2.sheets.get(page_index)
+    mode, dets, exemplar, traced = _run_detection(
+        v2, page_index, box, any_size, veto_text, policy)
+    if mode is None:
+        return dets                          # the error dict
     accepted = [d for d in dets if d.decision == "accept"]
     review = [d for d in dets if d.decision == "review"]
     # evidence-weak candidates ride along (disqualified labeled/zone hits do
@@ -144,6 +157,50 @@ def detect(doc_state, page_index: int, box, any_size=True, veto_text=True,
         "conf_accept": confidence(acc_thr),
         "conf_review": confidence(rev_thr),
         "detections": [_det_json(d, sheet) for d in shown],
+    }
+
+
+def reconcile(doc_state, page_index: int, box, schedule_page: int | None = None,
+              policy: Policy = DEFAULT) -> dict:
+    """Trace-then-cross-check: run detection, then compare the room-by-room
+    counts against the document's own panel schedules."""
+    from .reconcile_schedule import reconcile as run_reconcile
+
+    t0 = time.time()
+    v2 = get_v2(doc_state)
+    mode, dets, _, _ = _run_detection(
+        v2, page_index, box, any_size=True, veto_text=True, policy=policy)
+    if mode is None:
+        return dets                          # the error dict
+    if mode != "symbol":
+        return {"error": "cross-check works on stamped symbols "
+                         "(trace a receptacle, not a door)"}
+
+    sheet = v2.sheets.get(page_index)
+    report = run_reconcile(doc_state.doc, sheet, dets,
+                           schedule_page=schedule_page or v2.schedule_page,
+                           policy=policy)
+    if isinstance(report, dict):             # unavailable / not found
+        return report
+    v2.schedule_page = report.schedule_page  # skip the scan next click
+
+    return {
+        "engine": "v2",
+        "elapsed": round(time.time() - t0, 2),
+        "plan_page": report.plan_page,
+        "schedule_page": report.schedule_page,
+        "n_detections": report.n_detections,
+        "n_excluded_scale": report.n_excluded_scale,
+        "n_unattributed": report.n_unattributed,
+        "n_circuits": report.n_circuits,
+        "n_corroborated": report.n_corroborated,
+        "rooms": [{
+            "room": r.room,
+            "symbols": r.n_symbols,
+            "circuits": len(r.circuits),
+            "circuit_text": r.circuits,
+            "status": r.status,
+        } for r in report.rooms],
     }
 
 

@@ -209,6 +209,18 @@ def _door_width_label(page_index, width_pt):
     return f"{width_pt:.0f}pt"       # no scale note found on sheet
 
 
+@app.post("/reconcile")
+def do_reconcile():
+    """Cross-check a traced symbol's counts against the panel schedules (v2)."""
+    if STATE is None:
+        return jsonify({"error": "no document loaded - upload a PDF first"})
+    q = request.get_json()
+    from pipeline import api as v2api
+    return jsonify(v2api.reconcile(
+        STATE, int(q["page"]), tuple(float(v) for v in q["box"]),
+        schedule_page=q.get("schedule_page")))
+
+
 @app.post("/detect")
 def do_detect():
     if STATE is None:
